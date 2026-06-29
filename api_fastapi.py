@@ -1,26 +1,39 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from PIL import Image
 import io
 from model.predict import Predictor
-from utils.nutrition import NutritionClient
-import os
 
-app = FastAPI(title='Food Nutrition Analyzer API (YOLOv8)')
-predictor = Predictor(device=os.getenv('YOLO_DEVICE', 'cpu'), conf_thres=float(os.getenv('YOLO_CONF', '0.3')))
-nutrition_client = NutritionClient(api_key=os.getenv('USDA_API_KEY', None))
+app = FastAPI(title='Food Nutrition Analyzer API')
+
+# Initialize predictor
+predictor = Predictor()
 
 @app.post('/analyze')
-async def analyze(file: UploadFile = File(...)):
-    contents = await file.read()
-    image = Image.open(io.BytesIO(contents)).convert('RGB')
-    preds = predictor.predict(image)
+async def analyze(
+    file: UploadFile = File(...)
+):
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert('RGB')
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid image file.")
+
+    try:
+        preds = predictor.predict_gemini(image)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gemini analysis failed: {str(e)}")
+
     results = []
     for p in preds:
-        nutr = nutrition_client.lookup_food(p['label'])
         results.append({
             'label': p['label'],
-            'confidence': float(p.get('confidence', 0.0)),
-            'nutrition': nutr
+            'confidence': float(p.get('confidence', 1.0)),
+            'bbox': p.get('bbox'),
+            'nutrition': p.get('nutrition')
         })
-    return JSONResponse({'predictions': results})
+        
+    return JSONResponse({
+        'engine': 'gemini',
+        'predictions': results
+    })

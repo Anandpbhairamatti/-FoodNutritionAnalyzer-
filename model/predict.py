@@ -1,98 +1,140 @@
-"""YOLOv8-based Predictor with robust fallback to demo stub.
+"""Predictor using Gemini Vision AI with Auto-Key Rotation.
 
 Behavior:
-- Attempts to import ultralytics.YOLO and use it for detection.
-- If ultralytics or torch is not available, falls back to the lightweight demo stub.
-- Outputs detections as [{'label':str,'confidence':float,'bbox':[x1,y1,x2,y2]}, ...]
+- Supports predicting via Gemini for advanced, highly accurate multimodal analysis.
+- Automatically handles API key rotation if a key expires or runs out of quota.
+- Outputs detections as [{'label':str,'confidence':float,'bbox':[x1,y1,x2,y2],'nutrition':{...}}, ...]
 """
+import os
 from typing import List, Dict, Optional
 from PIL import Image
 import numpy as np
+from pydantic import BaseModel, Field
+import google.generativeai as genai
+import json
 
-# Try to import ultralytics; if unavailable, we'll fallback to stub implementation
-try:
-    from ultralytics import YOLO
-    _HAS_ULTRALYTICS = True
-except Exception:
-    _HAS_ULTRALYTICS = False
+class FoodItem(BaseModel):
+    label: str = Field(description="Name/label of the detected food item (e.g. White Rice, Roti, Dal, Mixed Vegetable Curry, Salad)")
+    ymin: float = Field(description="Bounding box top coordinate (0 to 1000)")
+    xmin: float = Field(description="Bounding box left coordinate (0 to 1000)")
+    ymax: float = Field(description="Bounding box bottom coordinate (0 to 1000)")
+    xmax: float = Field(description="Bounding box right coordinate (0 to 1000)")
+    calories: float = Field(description="Estimated calories in kcal")
+    protein_g: float = Field(description="Estimated protein in grams")
+    fat_g: float = Field(description="Estimated fat in grams")
+    carbs_g: float = Field(description="Estimated carbohydrates in grams")
+    matched_food: str = Field(description="Canonical food name or description of matching food")
 
-import random
+class FoodAnalysisResponse(BaseModel):
+    predictions: List[FoodItem]
 
-class DemoStubPredictor:
+class ApiKeyRotator:
     def __init__(self):
-        self.labels = ['apple','banana','pizza','burger','salad','rice','pasta','fries','egg']
+        self.keys = []
+        
+        # Check standard environment variables
+        primary_key = os.getenv("GEMINI_API_KEY")
+        if primary_key:
+            self.keys.append(primary_key)
+            
+        # Check fallback/alternative environment variables (e.g., GEMINI_API_KEY_1, GEMINI_API_KEY_2)
+        for i in range(1, 10):
+            k = os.getenv(f"GEMINI_API_KEY_{i}")
+            if k:
+                self.keys.append(k)
 
-    def predict(self, image: Image.Image) -> List[Dict]:
-        n = random.randint(1,3)
-        out = []
-        w,h = image.size
-        for _ in range(n):
-            label = random.choice(self.labels)
-            conf = round(random.uniform(0.6,0.99),2)
-            bbox = [int(w*0.1), int(h*0.1), int(w*0.6), int(h*0.6)]
-            out.append({'label': label, 'confidence': conf, 'bbox': bbox})
-        return out
+        # Hardcoded backup pool in code (user can insert keys directly here)
+        hardcoded_keys = []
+        self.keys.extend(hardcoded_keys)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        self.keys = [x for x in self.keys if not (x in seen or seen.add(x))]
+        
+        self.current_idx = 0
 
-class YOLOPredictor:
-    def __init__(self, model_path: Optional[str] = 'yolov8n.pt', device: str = 'cpu', conf_thres: float = 0.3):
-        # model_path can be a local path or an ultralytics model string
-        self.device = device
-        self.conf_thres = conf_thres
-        self.model_path = model_path
-        self.model = None
-        try:
-            self.model = YOLO(self.model_path)
-            # Set model device if supported
-            try:
-                # ultralytics allows setting model.to(device) or passing device in predict
-                pass
-            except Exception:
-                pass
-        except Exception as e:
-            # If model fails to load, raise to let caller fallback
-            raise RuntimeError(f"Failed to initialize YOLO model: {e}")
+    def get_key(self) -> Optional[str]:
+        if not self.keys:
+            return None
+        return self.keys[self.current_idx]
 
-    def predict(self, image: Image.Image) -> List[Dict]:
-        # ultralytics can accept numpy arrays
-        arr = np.array(image)
-        # run prediction; pass device and conf threshold
-        results = self.model.predict(source=arr, imgsz=640, conf=self.conf_thres, device=self.device)
-        if not results or len(results) == 0:
-            return []
-        res = results[0]
-        boxes = getattr(res, 'boxes', None)
-        if boxes is None or len(boxes) == 0:
-            return []
-        xyxy = boxes.xyxy.cpu().numpy()  # (N,4)
-        confs = boxes.conf.cpu().numpy() # (N,)
-        clss = boxes.cls.cpu().numpy()   # (N,)
-        out = []
-        for bbox, conf, cls_idx in zip(xyxy, confs, clss):
-            label = self.model.names[int(cls_idx)]
-            out.append({
-                'label': str(label),
-                'confidence': float(conf),
-                'bbox': [float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])]
-            })
-        return out
+    def rotate_key(self) -> bool:
+        if not self.keys or len(self.keys) <= 1:
+            return False
+        self.current_idx = (self.current_idx + 1) % len(self.keys)
+        return True
 
 class Predictor:
-    def __init__(self, model_path: Optional[str] = 'yolov8n.pt', device: str = 'cpu', conf_thres: float = 0.3):
-        self.device = device
-        self.conf_thres = conf_thres
-        self.model_path = model_path
-        self._predictor = None
-        # Prefer YOLO if available
-        if _HAS_ULTRALYTICS:
-            try:
-                self._predictor = YOLOPredictor(model_path=self.model_path, device=self.device, conf_thres=self.conf_thres)
-            except Exception as e:
-                # Fallback to demo stub if loading fails
-                print(f"[Predictor] YOLO init failed, falling back to demo stub: {e}")
-                self._predictor = DemoStubPredictor()
-        else:
-            print("[Predictor] ultralytics not available — using demo stub predictor. To enable YOLO, pip install ultralytics and torch.")
-            self._predictor = DemoStubPredictor()
+    def __init__(self):
+        self.rotator = ApiKeyRotator()
 
-    def predict(self, image: Image.Image) -> List[Dict]:
-        return self._predictor.predict(image)
+    def predict_gemini(self, image: Image.Image) -> List[Dict]:
+        attempts = max(1, len(self.rotator.keys))
+        last_error = "No API keys found in pool or environment variables."
+        
+        for _ in range(attempts):
+            api_key = self.rotator.get_key()
+            if not api_key:
+                break
+                
+            try:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-2.5-flash')
+                
+                prompt = (
+                    "Analyze this food image. Detect all individual food items. For each item, "
+                    "draw a bounding box around it (coordinates 0 to 1000 relative to the image size) "
+                    "and estimate its macronutrients (calories, protein in grams, fat in grams, carbohydrates in grams)."
+                )
+                
+                response = model.generate_content(
+                    [prompt, image],
+                    generation_config={
+                        "response_mime_type": "application/json",
+                        "response_schema": FoodAnalysisResponse,
+                    }
+                )
+                
+                data = json.loads(response.text)
+                raw_preds = data.get("predictions", [])
+                
+                width, height = image.size
+                out = []
+                
+                for item in raw_preds:
+                    ymin = float(item.get('ymin', 0.0))
+                    xmin = float(item.get('xmin', 0.0))
+                    ymax = float(item.get('ymax', 0.0))
+                    xmax = float(item.get('xmax', 0.0))
+                    
+                    x1 = float(xmin / 1000.0 * width)
+                    y1 = float(ymin / 1000.0 * height)
+                    x2 = float(xmax / 1000.0 * width)
+                    y2 = float(ymax / 1000.0 * height)
+                    
+                    label = item.get('label', 'Unknown Food')
+                    
+                    out.append({
+                        'label': label,
+                        'confidence': 1.0,
+                        'bbox': [x1, y1, x2, y2],
+                        'nutrition': {
+                            'name': item.get('matched_food', label),
+                            'calories': item.get('calories'),
+                            'protein_g': item.get('protein_g'),
+                            'fat_g': item.get('fat_g'),
+                            'carbs_g': item.get('carbs_g'),
+                            'serving_size': 'Estimated portion',
+                            'match': label,
+                            'source': 'gemini'
+                        }
+                    })
+                return out
+                
+            except Exception as e:
+                last_error = str(e)
+                # Rotate key and retry
+                if not self.rotator.rotate_key():
+                    break
+                    
+        raise RuntimeError(f"Gemini API request failed. Last error: {last_error}")
