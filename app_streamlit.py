@@ -43,6 +43,7 @@ if image_file is not None:
     st.image(image, caption='Selected Image', width='stretch')
 
     preds = []
+    success = False
     
     if len(predictor.rotator.keys) == 0:
         st.error("🔑 **No Gemini API Key found!** Please set the `GEMINI_API_KEY` environment variable in your terminal session, or add your key directly to the backup pool in [predict.py](file:///c:/Users/Administrator/OneDrive/Desktop/FA/model/predict.py#L42-L44).")
@@ -50,6 +51,7 @@ if image_file is not None:
         with st.spinner('Analyzing image with Gemini Vision AI...'):
             try:
                 preds = predictor.predict_gemini(image)
+                success = True
             except Exception as e:
                 st.error(f"Error during Gemini analysis: {e}")
 
@@ -103,5 +105,7 @@ if image_file is not None:
 
         annotated = draw_predictions(image, preds)
         st.image(annotated, caption='Annotated detections', width='stretch')
+    elif success:
+        st.warning("🔍 **No food items were detected in this image.** Please try a different photo with better lighting or framing.")
 else:
     st.info('Upload an image to get started.')
