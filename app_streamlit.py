@@ -27,13 +27,20 @@ st.sidebar.markdown(
 # Initialize predictor
 predictor = Predictor()
 
-st.markdown("Upload a photo of your meal and get an estimated calorie and nutrition breakdown.")
+st.markdown("Upload a photo or capture a live image of your meal to get an estimated calorie and nutrition breakdown.")
 
-uploaded = st.file_uploader("Upload food photo", type=['png', 'jpg', 'jpeg'])
+# Input selection
+input_method = st.radio("Choose Input Method", ["Upload Image", "Take Photo via Camera"], horizontal=True)
 
-if uploaded is not None:
-    image = Image.open(io.BytesIO(uploaded.read())).convert('RGB')
-    st.image(image, caption='Uploaded image', width='stretch')
+image_file = None
+if input_method == "Upload Image":
+    image_file = st.file_uploader("Upload food photo", type=['png', 'jpg', 'jpeg'])
+else:
+    image_file = st.camera_input("Take a photo of your food")
+
+if image_file is not None:
+    image = Image.open(io.BytesIO(image_file.read())).convert('RGB')
+    st.image(image, caption='Selected Image', width='stretch')
 
     preds = []
     
