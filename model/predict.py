@@ -32,6 +32,27 @@ class ApiKeyRotator:
     def __init__(self):
         self.keys = []
         
+        # Load from local .env file if it exists to avoid hardcoding secrets
+        env_paths = [
+            ".env",
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+        ]
+        for path in env_paths:
+            if os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith("#") and "=" in line:
+                                k, v = line.split("=", 1)
+                                k, v = k.strip(), v.strip()
+                                if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                                    v = v[1:-1]
+                                if k and v and k not in os.environ:
+                                    os.environ[k] = v
+                except Exception:
+                    pass
+        
         # Check standard environment variables
         primary_key = os.getenv("GEMINI_API_KEY")
         if primary_key:

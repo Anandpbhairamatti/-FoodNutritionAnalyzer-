@@ -33,7 +33,7 @@ uploaded = st.file_uploader("Upload food photo", type=['png', 'jpg', 'jpeg'])
 
 if uploaded is not None:
     image = Image.open(io.BytesIO(uploaded.read())).convert('RGB')
-    st.image(image, caption='Uploaded image', use_container_width=True)
+    st.image(image, caption='Uploaded image', width='stretch')
 
     preds = []
     
@@ -95,6 +95,6 @@ if uploaded is not None:
             st.info('Not enough numeric nutrition data to display macro distribution.')
 
         annotated = draw_predictions(image, preds)
-        st.image(annotated, caption='Annotated detections', use_container_width=True)
+        st.image(annotated, caption='Annotated detections', width='stretch')
 else:
     st.info('Upload an image to get started.')
